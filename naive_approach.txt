@@ -1,0 +1,342 @@
+Naive Approach: Beginner-Level Time Series Forecasting
+======================================================
+Forecasting Daily Withdrawal & Deposit Amounts for a Bank
+
+This document explains EVERY step in naive_eda.ipynb in plain English.
+If you're new to time series, read this alongside the notebook.
+
+=========================================================================
+WHAT WE HAVE (Starting Point)
+=========================================================================
+
+After basic cleaning and aggregation, our data looks like this:
+
+  value_date  | withdrawal_amt | deposit_amt
+  ------------|----------------|------------
+  2015-01-01  |         0.00   | 2,004,999
+  2015-01-02  |   5,500,056    | 2,465,620
+  2015-01-03  |   2,200,000    | 2,948,160
+  2015-01-05  |   3,231,000    | 3,909,020    ← notice: Jan 4 is MISSING
+  2015-01-06  |   3,880,056    | 3,650,750
+
+Each row = one day. Two columns = total money withdrawn and deposited that day.
+
+GOAL: Given past days, predict withdrawal_amt and deposit_amt for future days.
+
+=========================================================================
+STEP-BY-STEP PLAN
+=========================================================================
+
+STEP 1: SET DATE AS INDEX
+-------------------------
+WHY:  Time series models in Python (statsmodels, pandas) expect the date
+      column to BE the index, not just a regular column. This lets pandas
+      know "this data is ordered by time" and enables .resample(), .shift(),
+      .rolling() etc.
+
+HOW:  df.set_index('value_date', inplace=True)
+
+Think of it like: the date becomes the "row label" instead of 0, 1, 2, 3...
+
+
+STEP 2: HANDLE MISSING DATES (Fill Gaps)
+-----------------------------------------
+WHY:  Notice Jan 4 is missing in our data. This means no transactions
+      happened on that day. But time series models need EVERY day to exist.
+      If Jan 3 is row 2 and Jan 5 is row 3, the model thinks they're
+      consecutive days — it doesn't know a day was skipped.
+
+      Analogy: Imagine reading a book with page 44 ripped out. You'd be
+      confused jumping from page 43 to page 45. Same with time series.
+
+HOW:  1. Create a complete date range from first date to last date
+      2. Reindex the dataframe to this range (missing days become NaN)
+      3. Fill NaN with 0 (no transactions = zero amount, not "unknown")
+
+
+STEP 3: PLOT THE DATA (Visual Inspection)
+------------------------------------------
+WHY:  Before running any tests, LOOK at the data. Your eyes can instantly
+      spot things that take a statistical test 10 lines of code to confirm:
+      - Is there a trend (going up or down over time)?
+      - Are there repeating patterns (every week? every month-end)?
+      - Are there sudden spikes (outliers)?
+
+HOW:  Simple line plots of withdrawal_amt and deposit_amt over time.
+
+What to look for:
+  - If the line generally goes UP over time → there's a TREND
+  - If you see a wave-like pattern repeating → there's SEASONALITY
+  - If there are huge spikes on certain days → OUTLIERS (month-end? holidays?)
+
+
+STEP 4: TIME SERIES DECOMPOSITION
+-----------------------------------
+WHY:  Every time series is made up of 3 hidden components:
+
+      Observed = Trend + Seasonality + Residual
+
+      - TREND: The long-term direction. Are withdrawals increasing year
+        over year? Or flat?
+      - SEASONALITY: Repeating cycles. Every Monday has higher withdrawals?
+        Every month-end has a spike? That's seasonality.
+      - RESIDUAL: Whatever is left after removing trend and seasonality.
+        This is the "noise" or random variation.
+
+      Decomposition SEPARATES these so you can see each one clearly.
+      This tells you:
+        - If trend exists → you may need differencing
+        - If seasonality is strong → use SARIMA (S = seasonal), not plain ARIMA
+        - If residuals are small → the model can capture most of the signal
+
+HOW:  seasonal_decompose(series, model='additive', period=7)
+      period=7 because we expect weekly patterns (7 days in a week)
+
+ADDITIVE vs MULTIPLICATIVE:
+  - Additive: Y = Trend + Seasonal + Residual
+    Use when seasonal swings stay roughly the SAME size over time.
+  - Multiplicative: Y = Trend × Seasonal × Residual
+    Use when seasonal swings GROW as the trend grows.
+  For beginners, start with additive. Switch to multiplicative if the
+  seasonal pattern clearly gets bigger over time.
+
+
+STEP 5: STATIONARITY TESTING (ADF & KPSS)
+-------------------------------------------
+WHY:  ARIMA (and most classical time series models) REQUIRE the data to be
+      "stationary." Stationary means:
+        1. The MEAN doesn't change over time (no trend)
+        2. The VARIANCE doesn't change over time (consistent spread)
+        3. The autocorrelation structure doesn't change
+
+      Think of it like this: if you pick any 30-day window from the data,
+      it should "look" roughly the same statistically — whether it's from
+      2015 or 2018.
+
+      Non-stationary data will trick the model into learning patterns that
+      are really just trends, not real repeating patterns.
+
+TWO TESTS — WHY BOTH?
+  ADF (Augmented Dickey-Fuller):
+    - H0 (null): Data is NON-stationary (has unit root)
+    - If p < 0.05 → reject H0 → data IS stationary ✓
+    - If p > 0.05 → cannot reject → data is non-stationary ✗
+
+  KPSS (Kwiatkowski-Phillips-Schmidt-Shin):
+    - H0 (null): Data IS stationary
+    - If p < 0.05 → reject H0 → data is NON-stationary ✗
+    - If p > 0.05 → cannot reject → data IS stationary ✓
+
+  Notice they test OPPOSITE null hypotheses. That's intentional.
+
+  | ADF says    | KPSS says    | Conclusion               |
+  |-------------|-------------|---------------------------|
+  | Stationary  | Stationary  | Definitely stationary     |
+  | Non-stat    | Non-stat    | Definitely non-stationary |
+  | Stationary  | Non-stat    | Trend-stationary (needs differencing) |
+  | Non-stat    | Stationary  | Difference-stationary     |
+
+  If non-stationary → go to Step 6.
+
+
+STEP 6: MAKING DATA STATIONARY (Differencing)
+-----------------------------------------------
+WHY:  If Step 5 says "non-stationary," we fix it using DIFFERENCING.
+
+      Instead of modeling the raw values:
+        [100, 103, 107, 112, 110]
+
+      We model the CHANGES:
+        [+3, +4, +5, -2]
+
+      This is called "first-order differencing": new_value = Y(t) - Y(t-1)
+
+      Why does this work? If the raw data has a trend (going up by ~4 each
+      day), the differences will hover around 4 — constant mean. That's
+      stationary!
+
+      After differencing, we re-run ADF/KPSS to confirm it worked.
+      If still non-stationary → apply differencing again (second-order).
+
+HOW:  df['withdrawal_amt'].diff()
+
+The "d" in ARIMA(p, d, q) = number of times you differenced.
+  d=0: no differencing needed (already stationary)
+  d=1: first-order differencing
+  d=2: second-order differencing (rare)
+
+
+STEP 7: ACF & PACF PLOTS
+--------------------------
+WHY:  These plots tell you the EXACT parameters for ARIMA(p, d, q).
+
+      ACF (Autocorrelation Function):
+        Shows how much today's value correlates with k days ago, for each k.
+        Example: ACF at lag 7 = 0.8 means "today's withdrawal is 80%
+        correlated with last week's same-day withdrawal."
+
+      PACF (Partial Autocorrelation Function):
+        Same thing, but REMOVES the effect of intermediate days.
+        ACF at lag 7 might be high just because lag 1 is high and it
+        compounds. PACF strips that out and shows the DIRECT effect of lag 7.
+
+HOW TO READ THEM:
+  - Plot shows bars at each lag. Blue shaded region = "not significant."
+  - Bars OUTSIDE the blue region = significant correlation at that lag.
+
+  RULE for choosing p and q:
+    - Look at PACF → count significant lags before cutoff → that's p (AR order)
+    - Look at ACF → count significant lags before cutoff → that's q (MA order)
+    - d = from Step 6 (number of differencings)
+
+  Example: If PACF has 2 significant bars then drops, and ACF has 1:
+    → ARIMA(2, 1, 1) assuming d=1 from differencing.
+
+
+STEP 8: TRAIN / TEST SPLIT
+----------------------------
+WHY:  We need to hold out recent data to test how well our model predicts
+      the FUTURE. If we train on all data, we have no way to measure
+      accuracy.
+
+      CRITICAL: In time series, you CANNOT do random splits.
+      Train must be BEFORE test in time. Otherwise the model "sees the
+      future" during training — that's data leakage.
+
+HOW:  Split the last 30 days as test, everything before as train.
+
+      Train: [Jan 2015 ────────────────── Nov 2018]
+      Test:  [                             Dec 2018]
+
+
+STEP 9: BASELINE — NAIVE FORECAST
+-----------------------------------
+WHY:  Before building any model, create the simplest possible prediction.
+      This is your BASELINE. If ARIMA can't beat the naive forecast, then
+      ARIMA is useless for this data.
+
+      Naive forecast: "Tomorrow will be the same as today."
+        prediction(t+1) = actual(t)
+
+      It sounds dumb, but it's surprisingly hard to beat for some data.
+
+HOW:  predictions = test_data.shift(1)
+      Then calculate RMSE, MAE between predictions and actuals.
+
+
+STEP 10: SMOOTHING METHODS (SMA, EMA)
+---------------------------------------
+WHY:  Smoothing removes day-to-day noise and reveals the underlying trend.
+      Also useful as simple forecasting methods.
+
+      SMA (Simple Moving Average): Average of last N days. Every day
+      gets equal weight.
+        Forecast = mean of last 7 days
+
+      EMA (Exponential Moving Average): Recent days get MORE weight,
+      older days get less. Reacts faster to changes.
+        Forecast = weighted average where yesterday matters more than
+        7 days ago
+
+HOW:  df['sma_7'] = df['withdrawal_amt'].rolling(7).mean()
+      df['ema_7'] = df['withdrawal_amt'].ewm(span=7).mean()
+
+
+STEP 11: EXPONENTIAL SMOOTHING MODELS
+---------------------------------------
+WHY:  These are step-up from simple moving averages.
+
+      SES (Simple Exponential Smoothing):
+        Like EMA but as a proper forecasting model. Good when there's
+        NO trend and NO seasonality.
+
+      Holt's (Double Exponential Smoothing):
+        Handles TREND. Good when data is going up or down but no
+        repeating cycles.
+
+      Holt-Winters (Triple Exponential Smoothing):
+        Handles TREND + SEASONALITY. Good when both exist.
+
+HOW:  Start with SES → check RMSE.
+      If data has trend → try Holt's.
+      If data has trend + seasonality → try Holt-Winters.
+
+
+STEP 12: ARIMA MODEL
+----------------------
+WHY:  ARIMA is the workhorse of time series forecasting. It combines:
+        AR (Auto-Regressive): Use past values to predict future.
+          "If yesterday was high, today might also be high."
+        I (Integrated): Differencing to make data stationary.
+        MA (Moving Average): Use past ERRORS to predict future.
+          "If I over-predicted yesterday, I'll correct today."
+
+      ARIMA(p, d, q):
+        p = number of AR terms (from PACF in Step 7)
+        d = number of differencings (from Step 6)
+        q = number of MA terms (from ACF in Step 7)
+
+HOW:  model = ARIMA(train_data, order=(p, d, q))
+      model.fit()
+      predictions = model.predict(start, end)
+
+
+STEP 13: SARIMA MODEL
+-----------------------
+WHY:  ARIMA ignores seasonality. If withdrawals spike every Monday or
+      every month-end, ARIMA won't capture that. SARIMA adds seasonal
+      terms.
+
+      SARIMA(p, d, q)(P, D, Q, s):
+        - (p, d, q) = same as ARIMA (non-seasonal part)
+        - (P, D, Q, s) = seasonal part
+          P = seasonal AR terms
+          D = seasonal differencing
+          Q = seasonal MA terms
+          s = season length (7 for weekly, 30 for monthly)
+
+HOW:  model = SARIMAX(train_data, order=(p,d,q),
+                       seasonal_order=(P,D,Q,s))
+
+
+STEP 14: MODEL EVALUATION & COMPARISON
+----------------------------------------
+WHY:  We need to pick the BEST model. Compare all models on the same
+      test set using the same metrics.
+
+METRICS:
+  MAE (Mean Absolute Error):
+    Average of |actual - predicted|. In same units as data (rupees).
+    "On average, the model is off by X rupees."
+
+  RMSE (Root Mean Squared Error):
+    Square root of average squared errors. Penalizes BIG errors more
+    than MAE. Also in rupees.
+
+  MAPE (Mean Absolute Percentage Error):
+    Average of |actual - predicted| / actual × 100.
+    "On average, the model is off by X percent."
+    Easiest to explain to non-technical stakeholders.
+
+  The model with LOWEST RMSE / MAE / MAPE on the test set wins.
+
+=========================================================================
+SUMMARY: THE COMPLETE PIPELINE
+=========================================================================
+
+  Raw CSV → Drop columns → Aggregate daily → Set date index
+    → Fill missing dates → Visualize → Decompose
+    → Test stationarity → Difference if needed → ACF/PACF
+    → Train/test split → Baseline (naive) → Smoothing → ARIMA → SARIMA
+    → Compare metrics → Pick best model → Forecast future
+
+=========================================================================
+KEY BEGINNER MISTAKES TO AVOID
+=========================================================================
+
+1. DON'T do random train/test split — always split by TIME
+2. DON'T skip stationarity testing — ARIMA on non-stationary data = garbage
+3. DON'T skip the naive baseline — if you can't beat "same as yesterday,"
+   your fancy model is worthless
+4. DON'T forget to fill missing dates — gaps confuse the model silently
+5. DON'T use the test set for tuning — that's cheating. Only evaluate once.
