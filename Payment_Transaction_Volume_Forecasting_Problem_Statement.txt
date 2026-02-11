@@ -1,0 +1,105 @@
+Problem Statement: Payment Transaction Volume Forecasting
+=========================================================
+
+1. Business Context
+-------------------
+Our payment processing infrastructure requires advance visibility into 
+transaction volumes to ensure adequate liquidity reserves and optimal infrastructure scaling. 
+Currently, capacity planning relies on static rules and manual estimates, 
+leading to either over-provisioning (cost waste) or 
+under-provisioning (service degradation during peak loads).
+
+2. Business Relevance — Why This Matters
+------------------------------------------
+- Liquidity Optimization: Accurate volume forecasts let the bank pre-allocate just enough cash reserves,
+ freeing idle capital for lending/investment instead of maintaining oversized static buffers.
+- Infrastructure Cost Reduction: Pre-scaling servers ahead of predicted peaks avoids 
+both over-provisioning (wasted spend) and under-provisioning (outages, failed transactions).
+- Service Reliability: Forecasting peak days (month-end salaries, holidays) prevents system degradation,
+ reducing transaction failures and customer churn.
+- Proactive Operations: 7-day and 30-day forecasts with confidence intervals 
+shift the bank from reactive firefighting to planned capacity management, enabling data-driven treasury and ops decisions.
+
+3. Objective
+------------
+Build an end-to-end time series forecasting solution that 
+predicts daily and weekly aggregate payment transaction volumes and 
+amounts using historical bank transaction data, 
+enabling proactive liquidity management and infrastructure capacity planning.
+
+4. Dataset
+----------
+- Source: Bank Transaction Data (https://www.kaggle.com/datasets/apoorvwatsky/bank-transaction-data)
+- Contents: Real bank transaction records with customer identifiers, transaction timestamps, amounts, and transaction types
+- Granularity: Individual transaction-level records to be aggregated at daily/weekly level
+
+5. Scope & Deliverables
+------------------------
+
+Phase 1 — EDA & Data Preparation
+- Exploratory data analysis: volume trends, seasonality (day-of-week, month-end, holidays), outliers, and distributional properties
+- Stationarity testing (ADF, KPSS)
+- Aggregation pipeline: raw transactions → daily/weekly volume & amount series
+- Train/validation/test split strategy (time-based, no leakage)
+
+Phase 2 — Modeling (Minimum 3 Approaches)
+
+  Model Family              Specific Models          Purpose
+  -------------------------------------------------------------------------
+  Statistical Baseline      ARIMA, SARIMA            Capture trend & seasonality on univariate series
+  ML Regression             XGBoost / Random Forest  Leverage engineered features (lags, rolling stats, calendar features)
+  (Stretch) Deep Learning   LSTM / Prophet           Compare neural/additive approaches if data volume permits
+
+Phase 3 — Evaluation & Comparison
+- Primary Metrics: RMSE, MAE, MAPE on held-out test set (last N days)
+- Secondary Metrics: Directional accuracy, peak-day capture rate
+- Baseline: Naive forecast (previous week's same-day volume)
+- Model comparison report with statistical significance testing
+
+Phase 4 — Output & Delivery
+- Forecast horizon: 7-day and 30-day ahead rolling forecasts
+- Confidence intervals: 80% and 95% prediction intervals for each forecast
+- Reproducible pipeline: End-to-end notebook/script from raw data → forecast output
+- Final model recommendation with justification
+
+6. Success Criteria
+-------------------
+
+  Metric                              Target
+  ---------------------------------------------------------------------------
+  MAPE (daily volume)                 < 15% on test set
+  MAPE (weekly volume)                < 10% on test set
+  Peak-day detection                  Correctly flag 80%+ of top-decile volume days
+  ML model beats SARIMA baseline      Statistically significant improvement on at least one metric
+
+7. Feature Engineering Expectations (Non-Exhaustive)
+----------------------------------------------------
+- Lag features (t-1, t-7, t-14, t-30)
+- Rolling statistics (7-day, 14-day, 30-day mean/std/min/max)
+- Calendar features: day-of-week, day-of-month, month, is_weekend, is_month_end, is_quarter_end
+- Holiday indicators (if applicable to the dataset's geography)
+- Transaction type mix ratios (if multiple types exist)
+
+8. Constraints & Guidelines
+----------------------------
+- No data leakage: Strictly time-ordered splits; no future information in features
+- Interpretability: At least one model must be explainable (feature importance / decomposition plots)
+- Reproducibility: Fixed random seeds, versioned data, documented preprocessing steps
+- Code quality: Modular, well-documented, runnable end-to-end from a single entry point
+
+9. Out of Scope (for this phase)
+---------------------------------
+- Real-time streaming forecasts
+- Customer-level transaction prediction
+- Anomaly/fraud detection
+- External macroeconomic data integration (can be explored in v2)
+
+10. Timeline & Checkpoints
+--------------------------
+
+  Checkpoint    Deliverable
+  ---------------------------------------------------------------------------
+  Week 1        EDA report + aggregated dataset + split strategy
+  Week 2        ARIMA/SARIMA baseline with evaluation
+  Week 3        ML models (XGBoost/RF) with feature engineering
+  Week 4        Model comparison report + final recommendation + clean pipeline
